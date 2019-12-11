@@ -2,6 +2,8 @@
 
 ## Baselines
 - NileTMRG (SemEval-2017 Task 8)
+- LSTM + GraphSage
+- Tweet2vec + GraphSage 
 - VAE + GraphSage
 
 ## Methodology
@@ -17,3 +19,8 @@
 
 ## Dataset
 - PHEME: https://figshare.com/articles/PHEME_dataset_for_Rumour_Detection_and_Veracity_Classification/6392078
+
+## Results
+- NileTMRG: 0.56, 0.56
+- VAE + GraphSage: 0.62, 0.62
+- Tweet2vec + GraphSage: 0.64, 0.64
