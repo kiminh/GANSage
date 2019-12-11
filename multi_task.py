@@ -11,13 +11,6 @@ from keras.utils import to_categorical
 
 def load_data():
     with open("saved_data", "rb") as file:
-        # data is a list with length 2000
-        # elements are {
-        #   'image_path': str
-        #   'gender': 'f'/'m'
-        #   'age_young': bool
-        #   'embedding': ndarray with shape (128,) dtype float64
-        # }
         data = np.array(pickle.load(file))
     with open("saved_data_flip", "rb") as file:
         data_flip = np.array(pickle.load(file))

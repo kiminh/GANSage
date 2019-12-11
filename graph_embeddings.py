@@ -1,11 +1,4 @@
 
-# coding: utf-8
-
-# In[1]:
-
-
-#!/usr/bin/python3
-
 import numpy as np;
 import networkx as nx;
 import tensorflow as tf;

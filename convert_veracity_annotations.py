@@ -1,6 +1,3 @@
-"""
-Python 3 function to convert rumour annotations into True, False, Unverified
-"""
 
 def convert_annotations(annotation, string = True):
     if 'misinformation' in annotation.keys() and 'true'in annotation.keys():

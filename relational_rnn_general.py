@@ -2,41 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-
-# this class largely follows the official sonnet implementation
-# https://github.com/deepmind/sonnet/blob/master/sonnet/python/modules/relational_memory.py
-
-
 class RelationalMemory(nn.Module):
-    """
-    Constructs a `RelationalMemory` object.
-    This class is same as the RMC from relational_rnn_models.py, but without language modeling-specific variables.
-    Args:
-      mem_slots: The total number of memory slots to use.
-      head_size: The size of an attention head.
-      input_size: The size of input per step. i.e. the dimension of each input vector
-      num_heads: The number of attention heads to use. Defaults to 1.
-      num_blocks: Number of times to compute attention per time step. Defaults
-        to 1.
-      forget_bias: Bias to use for the forget gate, assuming we are using
-        some form of gating. Defaults to 1.
-      input_bias: Bias to use for the input gate, assuming we are using
-        some form of gating. Defaults to 0.
-      gate_style: Whether to use per-element gating ('unit'),
-        per-memory slot gating ('memory'), or no gating at all (None).
-        Defaults to `unit`.
-      attention_mlp_layers: Number of layers to use in the post-attention
-        MLP. Defaults to 2.
-      key_size: Size of vector to use for key & query vectors in the attention
-        computation. Defaults to None, in which case we use `head_size`.
-
-      # NEW flag for this class
-      return_all_outputs: Whether the model returns outputs for each step (like seq2seq) or only the final output.
-    Raises:
-      ValueError: gate_style not one of [None, 'memory', 'unit'].
-      ValueError: num_blocks is < 1.
-      ValueError: attention_mlp_layers is < 1.
-    """
 
     def __init__(self, mem_slots, head_size, input_size, num_heads=1, num_blocks=1, forget_bias=1., input_bias=0.,
                  gate_style='unit', attention_mlp_layers=2, key_size=None, return_all_outputs=False):
@@ -112,19 +78,6 @@ class RelationalMemory(nn.Module):
             return tuple(self.repackage_hidden(v) for v in h)
 
     def initial_state(self, batch_size, trainable=False):
-        """
-        Creates the initial memory.
-        We should ensure each row of the memory is initialized to be unique,
-        so initialize the matrix to be the identity. We then pad or truncate
-        as necessary so that init_state is of size
-        (batch_size, self.mem_slots, self.mem_size).
-        Args:
-          batch_size: The size of the batch.
-          trainable: Whether the initial state is trainable. This is always True.
-        Returns:
-          init_state: A truncated or padded matrix of size
-            (batch_size, self.mem_slots, self.mem_size).
-        """
         init_state = torch.stack([torch.eye(self.mem_slots) for _ in range(batch_size)])
 
         # pad the matrix with zeros
@@ -140,28 +93,11 @@ class RelationalMemory(nn.Module):
         return init_state
 
     def multihead_attention(self, memory):
-        """
-        Perform multi-head attention from 'Attention is All You Need'.
-        Implementation of the attention mechanism from
-        https://arxiv.org/abs/1706.03762.
-        Args:
-          memory: Memory tensor to perform attention on.
-        Returns:
-          new_memory: New memory tensor.
-        """
-
         # First, a simple linear projection is used to construct queries
         qkv = self.qkv_projector(memory)
         # apply layernorm for every dim except the batch dim
         qkv = self.qkv_layernorm(qkv)
-
-        # mem_slots needs to be dynamically computed since mem_slots got concatenated with inputs
-        # example: self.mem_slots=10 and seq_length is 3, and then mem_slots is 10 + 1 = 11 for each 3 step forward pass
-        # this is the same as self.mem_slots_plus_input, but defined to keep the sonnet implementation code style
-        mem_slots = memory.shape[1]  # denoted as N
-
-        # split the qkv to multiple heads H
-        # [B, N, F] => [B, N, H, F/H]
+        mem_slots = memory.shape[1]
         qkv_reshape = qkv.view(qkv.shape[0], mem_slots, self.num_heads, self.qkv_size)
 
         # [B, N, H, F/H] => [B, H, N, F/H]
@@ -208,26 +144,7 @@ class RelationalMemory(nn.Module):
             return 0
 
     def create_gates(self, inputs, memory):
-        """
-        Create input and forget gates for this step using `inputs` and `memory`.
-        Args:
-          inputs: Tensor input.
-          memory: The current state of memory.
-        Returns:
-          input_gate: A LSTM-like insert gate.
-          forget_gate: A LSTM-like forget gate.
-        """
-        # We'll create the input and forget gates at once. Hence, calculate double
-        # the gate size.
-
-        # equation 8: since there is no output gate, h is just a tanh'ed m
         memory = torch.tanh(memory)
-
-        # sonnet uses this, but i think it assumes time step of 1 for all cases
-        # if inputs is (B, T, features) where T > 1, this gets incorrect
-        # inputs = inputs.view(inputs.shape[0], -1)
-
-        # fixed implementation
         if len(inputs.shape) == 3:
             if inputs.shape[1] > 1:
                 raise ValueError(
@@ -277,18 +194,6 @@ class RelationalMemory(nn.Module):
         return memory
 
     def forward_step(self, inputs, memory, treat_input_as_matrix=False):
-        """
-        Forward step of the relational memory core.
-        Args:
-          inputs: Tensor input.
-          memory: Memory output from the previous time step.
-          treat_input_as_matrix: Optional, whether to treat `input` as a sequence
-            of matrices. Default to False, in which case the input is flattened
-            into a vector.
-        Returns:
-          output: This time step's output.
-          next_memory: The next version of memory to use.
-        """
 
         if treat_input_as_matrix:
             # keep (Batch, Seq, ...) dim (0, 1), flatten starting from dim 2
@@ -322,16 +227,6 @@ class RelationalMemory(nn.Module):
         return output, next_memory
 
     def forward(self, inputs, memory, treat_input_as_matrix=False):
-        # Starting each batch, we detach the hidden state from how it was previously produced.
-        # If we didn't, the model would try backpropagating all the way to start of the dataset.
-
-        # for loop implementation of (entire) recurrent forward pass of the model
-        # inputs is batch first [batch, seq], and output logit per step is [batch, vocab]
-        # so the concatenated logits are [seq * batch, vocab]
-
-        # targets are flattened [seq, batch] => [seq * batch], so the dimension is correct
-
-        # memory = self.repackage_hidden(memory)
         logit = 0
         logits = []
         # shape[1] is seq_lenth T
@@ -344,21 +239,3 @@ class RelationalMemory(nn.Module):
             return logits, memory
         else:
             return logit.unsqueeze(1), memory
-
-# ########## DEBUG: unit test code ##########
-# input_size = 32
-# seq_length = 20
-# batch_size = 32
-# num_tokens = 5000
-# model = RelationalMemory(mem_slots=1, head_size=512, input_size=input_size, num_heads=2)
-# model_memory = model.initial_state(batch_size=batch_size)
-#
-# # random input
-# random_input = torch.randn((32, seq_length, input_size))
-# # random targets
-# random_targets = torch.randn((32, seq_length, input_size))
-#
-# # take a one step forward
-# logit, next_memory = model(random_input, model_memory)
-# print(next_memory.shape)
-# print(logit.shape)
